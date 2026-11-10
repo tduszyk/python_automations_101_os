@@ -8,8 +8,8 @@ def get_load_average() -> None:
 
     # Extract the load averages as floating point numbers
     load_1: float = float(data[0])
-    load_2: float = float(data[1])
-    load_3: float = float(data[2])
+    load_5: float = float(data[1])
+    load_15: float = float(data[2])
 
     # Split the scheduling entities (e.g., '1/450')
     entities: list[str] = data[3].split('/')
@@ -21,4 +21,9 @@ def get_load_average() -> None:
     cpu_count: int = os.cpu_count() or 1
     saturation: float = (load_1 / cpu_count) * 100
     
-    print
+    print("=== Native /proc/loadavg Telemetry ===")
+    print(f"CPUs Available: {cpu_count}")
+    print(f"Load Average:   1m={load_1:.2f}, 5m={load_5:.2f}, 15m={load_15:.2f}")
+    print(f"1m Saturation:  {saturation:.1f}%")
+    print(f"Proceses:       {runnable} actively running / {total} total")
+    print(f"Latest PID:     {last_pid}")
