@@ -27,3 +27,6 @@ def get_load_average() -> None:
     print(f"1m Saturation:  {saturation:.1f}%")
     print(f"Proceses:       {runnable} actively running / {total} total")
     print(f"Latest PID:     {last_pid}")
+
+if __name__ == '__main__':
+    get_load_average()
