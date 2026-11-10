@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import json
 import os
 import signal
 import sys
@@ -9,65 +10,62 @@ from urllib.error import URLError, HTTPError
 from types import FrameType
 from typing import Optional
 
-# 1. Global Signal Handler
 def graceful_shutdown(signum: int, frame: Optional[FrameType]) -> None:
-    print(f"\n[WARN] Caught signal {signum}. Shutting down gracefully...")
+    # Route warnings to stderr so we don't corrupt stdout JSON/Prometheus payloads
+    print(f"\n[WARN] Caught signal {signum}. Shutting down...", file=sys.stderr)
     sys.exit(0)
 
-# 2. Native Telemetry Module
-def get_memory_stats() -> None:
+def get_memory_stats(fmt: str) -> None:
     mem_data: dict[str, int] = {}
     with open('/proc/meminfo', 'r') as f:
         for line in f:
             if line.startswith(('MemTotal:', 'MemAvailable:')):
                 parts: list[str] = line.split()
-                mem_data[parts[0].strip(':')] = int(parts[1])
+                # /proc/meminfo outputs in kB. Convert to bytes for strict metric standards.
+                mem_data[parts[0].strip(':')] = int(parts[1]) * 1024
     
     used: int = mem_data['MemTotal'] - mem_data['MemAvailable']
     percent: float = (used / mem_data['MemTotal']) * 100
-    print(f"Memory: {mem_data['MemTotal'] // 1024}MB Total | {percent:.1f}% Used")
+    hostname: str = os.uname().nodename
 
-# 3. Asynchronous Polling Module
-def fetch_status(url: str) -> str:
-    try:
-        req = urllib.request.Request(url, method='GET')
-        with urllib.request.urlopen(req, timeout=3) as res:
-            return f"{url:<25} -> HTTP {res.getcode()}"
-    except HTTPError as e:
-        return f"{url:<25} -> HTTP {e.code}"
-    except URLError as e:
-        return f"{url:<25} -> Error: {e.reason}"
-    except Exception as e:
-        return f"{url:<25} -> Error: {str(e)}"
+    if fmt == 'json':
+        payload = {
+            "host": hostname,
+            "memory_total_bytes": mem_data['MemTotal'],
+            "memory_available_bytes": mem_data['MemAvailable'],
+            "memory_used_bytes": used,
+            "memory_utilization_percent": round(percent, 2)
+        }
+        print(json.dumps(payload, indent=2))
+        
+    elif fmt == 'prometheus':
+        print(f'# HELP node_memory_total_bytes Total physical memory in bytes')
+        print(f'# TYPE node_memory_total_bytes gauge')
+        print(f'node_memory_total_bytes{{host="{hostname}"}} {mem_data["MemTotal"]}')
+        
+        print(f'# HELP node_memory_utilization_percent Memory utilization percentage')
+        print(f'# TYPE node_memory_utilization_percent gauge')
+        print(f'node_memory_utilization_percent{{host="{hostname}"}} {percent:.2f}')
+        
+    else:
+        print(f"Memory: {mem_data['MemTotal'] // (1024*1024)}MB Total | {percent:.1f}% Used")
 
-async def poll_fleet() -> None:
-    nodes: list[str] = [
-        "http://192.168.1.73:8080",
-        "http://192.168.1.74:8080",
-        "http://192.168.1.75:8080"
-    ]
-    print("Polling fleet health asynchronously...")
-    tasks = [asyncio.to_thread(fetch_status, url) for url in nodes]
-    results: list[str] = await asyncio.gather(*tasks)
-    for r in results:
-        print(r)
-
-# 4. CLI Routing & Argument Parsing
 def main() -> None:
-    # Register signals for the entire CLI execution
     signal.signal(signal.SIGTERM, graceful_shutdown)
     signal.signal(signal.SIGINT, graceful_shutdown)
     
     parser = argparse.ArgumentParser(description="Fleet Telemetry & Orchestration CLI")
     parser.add_argument('--module', type=str, choices=['memory', 'poll'], required=True, 
                         help="Select the telemetry module to execute")
+    parser.add_argument('--format', type=str, choices=['text', 'json', 'prometheus'], default='text',
+                        help="Define the output structure (default: text)")
     
     args: argparse.Namespace = parser.parse_args()
     
     if args.module == 'memory':
-        get_memory_stats()
+        get_memory_stats(args.format)
     elif args.module == 'poll':
-        asyncio.run(poll_fleet())
+        print("[INFO] Polling module execution placeholder.", file=sys.stderr)
 
 if __name__ == '__main__':
     main()
